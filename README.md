@@ -2,7 +2,7 @@
 
 A full-stack MERN platform where multiple AI agents (Planner, Coder, Debugger, Docs) collaborate to help developers plan, build, and debug software projects.
 
-![Stack](https://img.shields.io/badge/stack-MERN-blueviolet) ![AI](https://img.shields.io/badge/AI-Claude%20%2F%20OpenAI-orange) ![Auth](https://img.shields.io/badge/auth-JWT-green)
+![Stack](https://img.shields.io/badge/stack-MERN-blueviolet)  ![Auth](https://img.shields.io/badge/auth-JWT-green)
 
 ## ✨ Features
 
