@@ -49,6 +49,22 @@ export default function StudyPlanDetailPage() {
 
   useEffect(() => { load(); }, [id]);
 
+  // Upload now returns immediately with status:'processing' (parsing/chunking/embedding
+  // runs in the background) instead of blocking the request until fully done — poll while
+  // anything is still processing so the UI actually reflects that, rather than sitting on
+  // a stale "processing" row forever.
+  useEffect(() => {
+    if (!materials?.some((m) => m.status === 'processing')) return;
+    const interval = setInterval(async () => {
+      try {
+        setMaterials(await studyPlansAPI.listMaterials(id));
+      } catch (err) {
+        console.error(err);
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [materials, id]);
+
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';

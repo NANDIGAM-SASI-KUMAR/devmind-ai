@@ -144,50 +144,58 @@ export const uploadMaterial = async (req, res) => {
     status: 'processing'
   });
 
-  try {
-    const filePath = path.join(STUDY_UPLOAD_DIR, req.file.filename);
-    const text = await extractText(filePath, req.file.originalname);
-    const { parents, children } = chunkStructured(text);
+  // Respond immediately — parsing, chunking, and embedding (which now runs a local ONNX
+  // model plus real network calls to Chroma) used to block this whole request, so the
+  // client sat waiting on the fetch itself, not just showing a decorative spinner. The
+  // frontend already renders a "processing" state correctly; it just never got the chance
+  // to show it because the response always already carried the final ready/failed status.
+  // Now it can, and polls (see StudyPlanDetailPage.jsx) until the real status lands.
+  res.status(202).json(material);
 
-    if (children.length === 0) {
-      material.status = 'failed';
-      material.error = 'No extractable text found in this file';
+  (async () => {
+    try {
+      const filePath = path.join(STUDY_UPLOAD_DIR, req.file.filename);
+      const text = await extractText(filePath, req.file.originalname);
+      const { parents, children } = chunkStructured(text);
+
+      if (children.length === 0) {
+        material.status = 'failed';
+        material.error = 'No extractable text found in this file';
+        await material.save();
+        return;
+      }
+
+      const collectionName = studyCollectionName(plan._id);
+      await RagParentChunk.insertMany(
+        parents.map((p) => ({
+          collectionName,
+          documentId: String(material._id),
+          parentId: `${material._id}_${p.parentId}`,
+          originalName: req.file.originalname,
+          heading: p.heading,
+          section: p.section,
+          text: p.text
+        }))
+      );
+      // Children's parentId must match the RagParentChunk records above exactly.
+      await addStructuredChunks(
+        plan._id,
+        material._id,
+        req.file.originalname,
+        children.map((c) => ({ ...c, parentId: `${material._id}_${c.parentId}` }))
+      );
+
+      material.status = 'ready';
+      material.chunkCount = children.length;
       await material.save();
-      return res.status(201).json(material);
+      await cacheDelByPrefix(`rag:ask:${plan._id}:`);
+    } catch (err) {
+      console.error('Material processing failed:', err);
+      material.status = 'failed';
+      material.error = 'Could not process this file';
+      await material.save();
     }
-
-    const collectionName = studyCollectionName(plan._id);
-    await RagParentChunk.insertMany(
-      parents.map((p) => ({
-        collectionName,
-        documentId: String(material._id),
-        parentId: `${material._id}_${p.parentId}`,
-        originalName: req.file.originalname,
-        heading: p.heading,
-        section: p.section,
-        text: p.text
-      }))
-    );
-    // Children's parentId must match the RagParentChunk records above exactly.
-    await addStructuredChunks(
-      plan._id,
-      material._id,
-      req.file.originalname,
-      children.map((c) => ({ ...c, parentId: `${material._id}_${c.parentId}` }))
-    );
-
-    material.status = 'ready';
-    material.chunkCount = children.length;
-    await material.save();
-    await cacheDelByPrefix(`rag:ask:${plan._id}:`);
-    res.status(201).json(material);
-  } catch (err) {
-    console.error('Material processing failed:', err);
-    material.status = 'failed';
-    material.error = 'Could not process this file';
-    await material.save();
-    res.status(201).json(material);
-  }
+  })();
 };
 
 // DELETE /api/study-plans/:id/materials/:materialId

@@ -31,13 +31,23 @@ const isOtpBypassed = () => process.env.SKIP_OTP_VERIFICATION === 'true';
 
 const sendOtp = async (email, purpose) => {
   const code = await issueOtp(email, purpose);
+
+  // When OTP verification is bypassed, the caller never tells the user "check your email"
+  // and never blocks on this code being delivered — so there's nothing correctness-wise
+  // gained by waiting on Resend's network round-trip here, only latency. Measured directly:
+  // this was adding real, avoidable time to signup/login. Fire-and-forget in that case;
+  // still awaited (and still fails loudly) when OTP is actually required, since telling a
+  // user to check an email that was never sent would be worse than a slower response.
+  if (isOtpBypassed()) {
+    sendOtpEmail({ to: email, code, purpose }).catch((err) => console.error('Failed to send OTP email (bypassed, non-blocking):', err.message));
+    return;
+  }
+
   try {
     await sendOtpEmail({ to: email, code, purpose });
   } catch (err) {
     console.error('Failed to send OTP email:', err.message);
-    if (!isOtpBypassed()) {
-      throw new Error('We could not send the verification email right now. Please try again shortly.');
-    }
+    throw new Error('We could not send the verification email right now. Please try again shortly.');
   }
 };
 

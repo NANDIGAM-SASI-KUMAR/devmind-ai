@@ -27,23 +27,45 @@ A full-stack MERN platform where multiple AI agents (Planner, Coder, Debugger, D
 
 ### Prerequisites
 - Node.js 18+ installed
+- Node.js (v18+ installed)
+- Python (for ChromaDB RAG functionality)
 - MongoDB Atlas account (free tier: https://www.mongodb.com/atlas)
 - Anthropic API key (https://console.anthropic.com) OR OpenAI key
 
 ### 1. Clone & install
+### Easy Setup (Windows)
 
+We have provided automated scripts for a one-click setup on Windows:
+
+1. **Install everything**: Double-click `install.bat`. This will automatically install Node modules for both client and server, and Python dependencies via `pip`.
+2. **Configure environment**: 
+   - In `server/`, copy `.env.example` to `.env` and fill in your MongoDB URI and Anthropic API Key.
+   - In `client/`, copy `.env.example` to `.env`.
+3. **Run the app**: Double-click `run.bat`. This will launch the ChromaDB server, Node backend, and Vite frontend simultaneously. Open http://localhost:5173 🎉
+
+### Manual Setup (Mac / Linux / Windows)
+
+#### 1. Install Dependencies
 ```bash
 # Install backend
 cd server
 npm install
+# Backend
+cd server && npm install
 
 # Install frontend
 cd ../client
 npm install
+# Frontend
+cd ../client && npm install
+
+# Python Dependencies (for ChromaDB)
+cd .. && pip install -r requirements.txt
 ```
 
 ### 2. Configure environment variables
 
+#### 2. Configure Environment
 **Backend (`server/.env`):**
 ```env
 PORT=5000
@@ -59,14 +81,23 @@ VITE_API_URL=http://localhost:5000/api
 ```
 
 ### 3. Run the app
+#### 3. Run the App (Requires 3 terminals)
 
 **Terminal 1 — Backend:**
+**Terminal 1 — ChromaDB:**
+```bash
+cd server
+npm run chroma
+```
+
+**Terminal 2 — Backend:**
 ```bash
 cd server
 npm run dev
 ```
 
 **Terminal 2 — Frontend:**
+**Terminal 3 — Frontend:**
 ```bash
 cd client
 npm run dev

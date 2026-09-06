@@ -4,7 +4,7 @@ echo DevMind AI - Startup Script
 echo =========================================
 
 echo Starting Chroma DB...
-start "Chroma DB Server" cmd /k "cd server && npm run chroma"
+start "Chroma DB Server" cmd /k "cd server && chroma run --path ./chroma_data --port 8000"
 
 echo Starting Backend Server...
 start "Backend Server" cmd /k "cd server && npm run dev"
