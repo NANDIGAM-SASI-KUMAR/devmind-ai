@@ -12,19 +12,20 @@ import {
   searchConversations
 } from '../controllers/conversationController.js';
 import { protect } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = express.Router();
 
 router.use(protect);
 
-router.get('/trash', listTrash);
-router.delete('/trash', emptyTrash);
-router.get('/pinned', listPinned);
-router.get('/search', searchConversations);
+router.get('/trash', asyncHandler(listTrash));
+router.delete('/trash', asyncHandler(emptyTrash));
+router.get('/pinned', asyncHandler(listPinned));
+router.get('/search', asyncHandler(searchConversations));
 
-router.route('/:id').get(getConversation).put(updateConversation).delete(trashConversation);
-router.post('/:id/restore', restoreConversation);
-router.delete('/:id/permanent', permanentlyDeleteConversation);
-router.get('/:id/messages', getConversationMessages);
+router.route('/:id').get(asyncHandler(getConversation)).put(asyncHandler(updateConversation)).delete(asyncHandler(trashConversation));
+router.post('/:id/restore', asyncHandler(restoreConversation));
+router.delete('/:id/permanent', asyncHandler(permanentlyDeleteConversation));
+router.get('/:id/messages', asyncHandler(getConversationMessages));
 
 export default router;

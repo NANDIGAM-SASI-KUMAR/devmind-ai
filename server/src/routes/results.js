@@ -4,19 +4,20 @@ import {
   getQuizAnalytics, getExamAnalytics, getStudyPlanAnalytics, getRecentActivity, getInsights
 } from '../controllers/resultsController.js';
 import { protect } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = express.Router();
 
 router.use(protect);
 
-router.get('/overview', getOverview);
-router.get('/trend', getTrend);
-router.get('/topics', getTopics);
-router.get('/topics/:topic', getTopicDetail);
-router.get('/quiz-analytics', getQuizAnalytics);
-router.get('/exam-analytics', getExamAnalytics);
-router.get('/study-plans', getStudyPlanAnalytics);
-router.get('/activity', getRecentActivity);
-router.get('/insights', getInsights);
+router.get('/overview', asyncHandler(getOverview));
+router.get('/trend', asyncHandler(getTrend));
+router.get('/topics', asyncHandler(getTopics));
+router.get('/topics/:topic', asyncHandler(getTopicDetail));
+router.get('/quiz-analytics', asyncHandler(getQuizAnalytics));
+router.get('/exam-analytics', asyncHandler(getExamAnalytics));
+router.get('/study-plans', asyncHandler(getStudyPlanAnalytics));
+router.get('/activity', asyncHandler(getRecentActivity));
+router.get('/insights', asyncHandler(getInsights));
 
 export default router;

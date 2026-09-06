@@ -22,6 +22,15 @@ import { errorHandler } from './middleware/errorHandler.js';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Backstop: an async route handler that isn't wrapped in asyncHandler (or a future one
+// someone forgets to wrap) would otherwise crash the entire process on a single bad
+// request — every user's connection dies, not just the one that triggered it. This keeps
+// the server alive and logs the error instead; asyncHandler is still the real fix per-route
+// (it turns the error into a clean JSON response), this is just the safety net beneath it.
+process.on('unhandledRejection', (reason) => {
+  console.error('🔥 Unhandled promise rejection (server stayed up):', reason);
+});
+
 // ---------- Middleware ----------
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
