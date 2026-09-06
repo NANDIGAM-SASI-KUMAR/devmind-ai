@@ -8,8 +8,18 @@ import { RAG_CONFIG } from './config.js';
 // probability. Normalizing within the batch gives a comparable, meaningful "how much
 // better is this candidate than the others we retrieved" signal without pretending either
 // raw scale means something on its own.
+// Regression note: with a single candidate (a genuinely common case — a study plan with
+// one short document), min === max === the only score, so (score - min) / range is always
+// 0 regardless of whether that one candidate is actually a great match or a terrible one —
+// caught by testing against a real single-chunk document, where this silently zeroed out
+// retrieval confidence for a correct, well-matched answer. Batch-relative normalization
+// simply has nothing to normalize AGAINST with only one item, so it's skipped in that case:
+// a lone candidate is treated as the best available (1.0), and the confidence formula's
+// absolute dense-similarity cap (rag/confidence.js) — not this batch-relative score — is
+// what actually decides whether it's good enough to answer from.
 const normalizeScores = (scored) => {
   if (scored.length === 0) return scored;
+  if (scored.length === 1) return [{ ...scored[0], rerankScoreNormalized: 1 }];
   const values = scored.map((c) => c.rerankScore);
   const min = Math.min(...values);
   const max = Math.max(...values);

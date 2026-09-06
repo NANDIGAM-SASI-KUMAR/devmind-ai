@@ -1,4 +1,5 @@
 import { ChromaClient, CloudClient } from 'chromadb';
+import { DefaultEmbeddingFunction } from '@chroma-core/default-embed';
 
 let client = null;
 const getClient = () => {
@@ -22,11 +23,27 @@ const getClient = () => {
   return client;
 };
 
+// Explicitly forcing the SAME embedding function on every collection, regardless of
+// backend, is deliberate — not cosmetic. Measured directly while adding Chroma Cloud
+// support: without this, Chroma Cloud silently used a different default embedding model
+// than the local server, producing a completely different similarity-score distribution
+// (a genuinely correct match scored ~0.27 instead of the ~0.5+ this app's retrieval
+// confidence formula is calibrated against). Computing embeddings client-side with the
+// same model everywhere keeps that calibration valid no matter which backend is active.
+let embeddingFunction = null;
+const getEmbeddingFunction = () => {
+  if (!embeddingFunction) embeddingFunction = new DefaultEmbeddingFunction();
+  return embeddingFunction;
+};
+
+const getOrCreateCollection = (collectionName) =>
+  getClient().getOrCreateCollection({ name: collectionName, embeddingFunction: getEmbeddingFunction() });
+
 // ---------- Generic collection helpers (used by both Study Plans and project code search) ----------
 
 const addChunksTo = async (collectionName, docId, originalName, chunks, extraMetaKey) => {
   if (chunks.length === 0) return;
-  const collection = await getClient().getOrCreateCollection({ name: collectionName });
+  const collection = await getOrCreateCollection(collectionName);
   await collection.add({
     ids: chunks.map((_, i) => `${docId}_${i}`),
     documents: chunks,
@@ -38,7 +55,7 @@ const addChunksTo = async (collectionName, docId, originalName, chunks, extraMet
 // parentId/heading/section so retrieval can resolve full parent context afterward.
 const addStructuredChunksTo = async (collectionName, docId, originalName, children, extraMetaKey) => {
   if (children.length === 0) return;
-  const collection = await getClient().getOrCreateCollection({ name: collectionName });
+  const collection = await getOrCreateCollection(collectionName);
   await collection.add({
     ids: children.map((_, i) => `${docId}_${i}`),
     documents: children.map((c) => c.text),
@@ -58,7 +75,7 @@ const addStructuredChunksTo = async (collectionName, docId, originalName, childr
 // a few hundred chunks); a larger corpus would need a persistent inverted index instead.
 const getAllDocs = async (collectionName) => {
   try {
-    const collection = await getClient().getOrCreateCollection({ name: collectionName });
+    const collection = await getOrCreateCollection(collectionName);
     const count = await collection.count();
     if (count === 0) return [];
     const result = await collection.get({ limit: count, include: ['documents', 'metadatas'] });
@@ -73,7 +90,7 @@ const getAllDocs = async (collectionName) => {
 // diversification, which needs the actual vectors to compute inter-candidate similarity.
 const queryWithEmbeddings = async (collectionName, queryText, nResults) => {
   try {
-    const collection = await getClient().getOrCreateCollection({ name: collectionName });
+    const collection = await getOrCreateCollection(collectionName);
     const count = await collection.count();
     if (count === 0) return [];
     const results = await collection.query({
@@ -96,7 +113,7 @@ const queryWithEmbeddings = async (collectionName, queryText, nResults) => {
 
 const deleteDocChunksFrom = async (collectionName, docId, extraMetaKey) => {
   try {
-    const collection = await getClient().getOrCreateCollection({ name: collectionName });
+    const collection = await getOrCreateCollection(collectionName);
     await collection.delete({ where: { [extraMetaKey]: String(docId) } });
   } catch (err) {
     console.error('Failed to delete chunks:', err.message);
@@ -113,7 +130,7 @@ const deleteCollectionByName = async (collectionName) => {
 
 const queryCollection = async (collectionName, queryText, nResults) => {
   try {
-    const collection = await getClient().getOrCreateCollection({ name: collectionName });
+    const collection = await getOrCreateCollection(collectionName);
     const count = await collection.count();
     if (count === 0) return [];
 
