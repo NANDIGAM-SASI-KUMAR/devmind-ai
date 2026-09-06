@@ -51,14 +51,25 @@ export const validateAnswer = async ({ answer, evidence }) => {
       confidence,
       unsupportedClaims,
       claims,
-      supportingSources
+      supportingSources,
+      timedOut: false
     };
   } catch (err) {
     console.error('Answer validation call failed:', err.message);
     // Fail toward caution, not blind trust: a mid confidence sits below the default
-    // groundedness threshold, so a broken validator triggers a retry/fallback rather than
-    // silently waving every answer through unchecked.
-    return { grounded: false, confidence: 0.5, unsupportedClaims: [], claims: [], supportingSources: [] };
+    // groundedness threshold, so a broken validator triggers a fallback rather than
+    // silently waving every answer through unchecked. `timedOut` lets the caller
+    // distinguish this from a genuine "unsupported claims found" verdict — regenerating
+    // the answer doesn't fix a slow validator API, it just spends another full
+    // generation+validation round-trip on what was likely already a fine answer.
+    return {
+      grounded: false,
+      confidence: 0.5,
+      unsupportedClaims: [],
+      claims: [],
+      supportingSources: [],
+      timedOut: err.message.includes('timed out')
+    };
   }
 };
 

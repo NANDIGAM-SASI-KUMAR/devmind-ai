@@ -80,7 +80,13 @@ export const runRagPipeline = async ({ collectionName, query, generate, override
 
   const MAX_RETRIES = 1;
   let retries = 0;
-  while ((!validation.grounded || validation.confidence < cfg.minGroundednessScore) && retries < MAX_RETRIES) {
+  // A validator TIMEOUT is not a "this answer has unsupported claims" verdict — the
+  // answer was probably fine, the validator API was just slow. Regenerating doesn't fix a
+  // slow external call, it just spends another full generation+validation round-trip
+  // (measured: this was a real, avoidable contributor to worst-case latency) for likely
+  // the same outcome. Skip the retry in that specific case and go straight to the
+  // (correctly degraded) confidence-based decision below.
+  while (!validation.timedOut && (!validation.grounded || validation.confidence < cfg.minGroundednessScore) && retries < MAX_RETRIES) {
     const tg = Date.now();
     answer = await generate(contextString);
     generationMs += Date.now() - tg;
