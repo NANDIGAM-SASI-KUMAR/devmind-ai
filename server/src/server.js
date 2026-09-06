@@ -18,6 +18,7 @@ import examRoutes from './routes/exams.js';
 import recommendationRoutes from './routes/recommendations.js';
 import resultsRoutes from './routes/results.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { warmUpLocalReranker } from './rag/localReranker.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -76,6 +77,7 @@ const start = async () => {
       console.log(`\n🚀 DevMind server running on http://localhost:${PORT}`);
       console.log(`📡 API available at http://localhost:${PORT}/api\n`);
     });
+    warmUpLocalReranker(); // fire-and-forget — first real request shouldn't pay the ~20s cold-load cost
   } catch (err) {
     console.error('❌ Failed to start server:', err.message);
     process.exit(1);

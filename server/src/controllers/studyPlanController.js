@@ -20,7 +20,7 @@ import { askStudyAgent } from '../agents/studyAgent.js';
 import { generateStudyPlanFromContext } from '../agents/studyPlanAgent.js';
 import { notify } from './notificationController.js';
 import { invalidateResultsCache } from './resultsController.js';
-import { cacheDelByPrefix } from '../utils/cache.js';
+import { cached, cacheDelByPrefix } from '../utils/cache.js';
 
 // Pulls a broad, de-duplicated sample of a study plan's indexed material —
 // queried per-material-name plus a generic overview query — so generation
@@ -179,6 +179,7 @@ export const uploadMaterial = async (req, res) => {
     material.status = 'ready';
     material.chunkCount = children.length;
     await material.save();
+    await cacheDelByPrefix(`rag:ask:${plan._id}:`);
     res.status(201).json(material);
   } catch (err) {
     console.error('Material processing failed:', err);
@@ -201,6 +202,7 @@ export const deleteMaterial = async (req, res) => {
   await deleteMaterialChunks(plan._id, material._id);
   await RagParentChunk.deleteMany({ collectionName: studyCollectionName(plan._id), documentId: String(material._id) });
   await material.deleteOne();
+  await cacheDelByPrefix(`rag:ask:${plan._id}:`);
 
   res.json({ message: 'Material deleted' });
 };
@@ -232,18 +234,30 @@ export const askQuestion = async (req, res) => {
     return res.json({ answer: "You haven't uploaded any material for this study plan yet, so I don't have anything to answer from." });
   }
 
-  try {
-    const result = await runRagPipeline({
+  // Debug mode is opt-in and only ever returns to the requesting user's own plan (already
+  // ownership-checked above) — never cached, always run fresh so the trace reflects
+  // exactly this request. Cache key is scoped by studyPlan (itself owned per-user), so a
+  // cached answer can never be served across users or study plans.
+  const debug = req.query.debug === 'true';
+  const cacheKey = `rag:ask:${plan._id}:${question.trim().toLowerCase().replace(/\s+/g, ' ')}`;
+
+  const runPipeline = () =>
+    runRagPipeline({
       collectionName: studyCollectionName(plan._id),
       query: question,
-      generate: (context) => askStudyAgent({ question, context, understandingLevel: plan.understandingLevel })
+      generate: (context) => askStudyAgent({ question, context, understandingLevel: plan.understandingLevel }),
+      debug
     });
+
+  try {
+    const result = debug ? await runPipeline() : await cached(cacheKey, 600, runPipeline);
     res.json({
       answer: result.answer,
       sources: [...new Set(result.citations.map((c) => c.source))],
       citations: result.citations,
       confidence: result.confidence,
-      grounded: result.grounded
+      grounded: result.grounded,
+      ...(debug ? { debug: result.debug } : {})
     });
   } catch (err) {
     console.error('Study agent failed:', err);

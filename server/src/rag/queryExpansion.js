@@ -1,4 +1,7 @@
 import { callLLM } from '../utils/llm.js';
+import { withTimeout } from './withTimeout.js';
+
+const EXPANSION_TIMEOUT_MS = 5000;
 
 const EXPANSION_SYSTEM = `You rewrite a search query into 2 alternative phrasings that might match different wording in source documents, for a retrieval system.
 
@@ -14,11 +17,14 @@ Rules:
 // per query cost real latency, worth paying only when the caller opts in.
 export const expandQuery = async (query) => {
   try {
-    const raw = await callLLM({
-      system: EXPANSION_SYSTEM,
-      messages: [{ role: 'user', content: `Query: ${query}\n\nGenerate the variants JSON now.` }],
-      maxTokens: 200
-    });
+    const raw = await withTimeout(
+      callLLM({
+        system: EXPANSION_SYSTEM,
+        messages: [{ role: 'user', content: `Query: ${query}\n\nGenerate the variants JSON now.` }],
+        maxTokens: 200
+      }),
+      EXPANSION_TIMEOUT_MS
+    );
     const parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, ''));
     return Array.isArray(parsed.variants) ? parsed.variants.filter(Boolean) : [];
   } catch (err) {

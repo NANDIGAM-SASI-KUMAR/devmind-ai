@@ -1,4 +1,7 @@
 import { callLLM } from '../utils/llm.js';
+import { withTimeout } from './withTimeout.js';
+
+const RERANK_TIMEOUT_MS = 8000;
 
 // There's no hosted cross-encoder (e.g. BGE reranker, Cohere Rerank) wired into this
 // project's infrastructure, and adding one means either a paid API key the user hasn't
@@ -21,11 +24,14 @@ export const rerankCandidates = async (query, candidates, { topK = 6 } = {}) => 
 
   const listText = candidates.map((c, i) => `[${i}] ${c.text.slice(0, 600)}`).join('\n\n');
   try {
-    const raw = await callLLM({
-      system: RERANK_SYSTEM,
-      messages: [{ role: 'user', content: `Query: ${query}\n\nCandidates:\n\n${listText}\n\nScore each candidate now.` }],
-      maxTokens: Math.max(400, candidates.length * 20)
-    });
+    const raw = await withTimeout(
+      callLLM({
+        system: RERANK_SYSTEM,
+        messages: [{ role: 'user', content: `Query: ${query}\n\nCandidates:\n\n${listText}\n\nScore each candidate now.` }],
+        maxTokens: Math.max(400, candidates.length * 20)
+      }),
+      RERANK_TIMEOUT_MS
+    );
     const parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, ''));
     const scoreByIndex = new Map(parsed.scores.map((s) => [s.index, s.score]));
 
