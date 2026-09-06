@@ -19,6 +19,7 @@ import recommendationRoutes from './routes/recommendations.js';
 import resultsRoutes from './routes/results.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { warmUpLocalReranker } from './rag/localReranker.js';
+import { RAG_CONFIG } from './rag/config.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -77,7 +78,13 @@ const start = async () => {
       console.log(`\n🚀 DevMind server running on http://localhost:${PORT}`);
       console.log(`📡 API available at http://localhost:${PORT}/api\n`);
     });
-    warmUpLocalReranker(); // fire-and-forget — first real request shouldn't pay the ~20s cold-load cost
+    // Only load the local cross-encoder into memory if it's actually the configured
+    // provider — on a memory-constrained host, an operator setting RERANKER_PROVIDER=llm
+    // specifically to avoid this model's ~90MB+ footprint would otherwise have it loaded
+    // anyway on every startup, for a reranker path that's never used.
+    if (RAG_CONFIG.rerankerProvider === 'local') {
+      warmUpLocalReranker(); // fire-and-forget — first real request shouldn't pay the ~20s cold-load cost
+    }
   } catch (err) {
     console.error('❌ Failed to start server:', err.message);
     process.exit(1);

@@ -20,23 +20,31 @@ const normalizeScores = (scored) => {
 // RerankerService: one interface, two providers, selected via RERANKER_PROVIDER.
 //   - "local" (default): a real cross-encoder run in-process via ONNX — no external call,
 //     ~5-10ms per candidate. Preferred since it needs no paid API and is dramatically
-//     faster than the LLM alternative.
-//   - "llm": the original single-batched-call LLM reranker from Phase 1, kept available
-//     as a fallback and for environments where local ONNX inference isn't practical.
-// If the configured provider fails outright (e.g. local model couldn't load — no network
-// on first run, disk issue, etc.), this falls back to the other provider rather than
-// letting a reranker failure take down the whole request.
+//     faster than the LLM alternative — but it loads a ~90MB model into memory, which is a
+//     real constraint on a memory-limited host (e.g. Render's free tier).
+//   - "llm": the original single-batched-call LLM reranker from Phase 1. No extra memory
+//     footprint beyond the LLM calls the app already makes everywhere else.
+// Fallback is intentionally ONE-DIRECTIONAL: local -> llm on failure (safe — llm has no
+// extra resource cost), but llm -> local is NOT attempted. If an operator has explicitly
+// chosen "llm" (e.g. to avoid the local model's memory footprint on a constrained host), a
+// transient LLM API hiccup should degrade to "skip reranking, use fusion order" — not
+// silently load a ~90MB model into memory anyway, which would defeat the entire reason
+// "llm" was chosen and risk an OOM crash triggered by an unrelated API blip.
 export const rerank = async (query, candidates, { topK, provider } = {}) => {
   const chosen = provider || RAG_CONFIG.rerankerProvider;
   const effectiveTopK = topK ?? RAG_CONFIG.rerankTopK;
 
   const runProvider = (p) => (p === 'local' ? localRerank(query, candidates, { topK: effectiveTopK }) : llmRerank(query, candidates, { topK: effectiveTopK }));
+  const fallback = chosen === 'local' ? 'llm' : null;
 
   try {
     const scored = await runProvider(chosen);
     return { results: normalizeScores(scored), providerUsed: chosen };
   } catch (err) {
-    const fallback = chosen === 'local' ? 'llm' : 'local';
+    if (!fallback) {
+      console.error(`[rag] Reranker provider "${chosen}" failed (${err.message}), skipping reranking entirely (no safe fallback configured)`);
+      return { results: candidates.slice(0, effectiveTopK), providerUsed: 'none' };
+    }
     console.error(`[rag] Reranker provider "${chosen}" failed (${err.message}), falling back to "${fallback}"`);
     try {
       const scored = await runProvider(fallback);
