@@ -19,6 +19,7 @@ import recommendationRoutes from './routes/recommendations.js';
 import resultsRoutes from './routes/results.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { warmUpLocalReranker } from './rag/localReranker.js';
+import { warmUpEmbeddingFunction } from './utils/chroma.js';
 import { RAG_CONFIG } from './rag/config.js';
 
 const app = express();
@@ -74,6 +75,19 @@ app.use(errorHandler);
 const start = async () => {
   try {
     await connectDB();
+
+    // Awaited, not fire-and-forget, and deliberately BEFORE app.listen(): this download
+    // corrupted itself in production when multiple concurrent first-use requests (exam
+    // creation queries Chroma once per topic, in parallel) all raced to download the same
+    // model file at once. Finishing this before any traffic is accepted means no request
+    // can ever race it again.
+    try {
+      await warmUpEmbeddingFunction();
+      console.log('[rag] Embedding model warmed up');
+    } catch (err) {
+      console.error('[rag] Embedding model warm-up failed (will retry lazily on first use):', err.message);
+    }
+
     app.listen(PORT, () => {
       console.log(`\n🚀 DevMind server running on http://localhost:${PORT}`);
       console.log(`📡 API available at http://localhost:${PORT}/api\n`);

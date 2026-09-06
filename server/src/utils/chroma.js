@@ -36,6 +36,20 @@ const getEmbeddingFunction = () => {
   return embeddingFunction;
 };
 
+// The embedding model is downloaded lazily to local disk on first use (same mechanism as
+// the local reranker). Root-caused a real production failure this way: multiple concurrent
+// first-use requests (exam creation fires one Chroma query per topic, in parallel) each
+// triggered their own download of the same model file into the same cache path, racing
+// each other and corrupting it ("Protobuf parsing failed" on every query afterward, since
+// the corrupted file is now permanently cached and never re-downloaded). This forces the
+// download to happen exactly once, synchronously, before the server accepts any traffic —
+// call and AWAIT this at startup, same pattern as warmUpLocalReranker.
+let warmupPromise = null;
+export const warmUpEmbeddingFunction = () => {
+  if (!warmupPromise) warmupPromise = getEmbeddingFunction().generate(['warm up']);
+  return warmupPromise;
+};
+
 const getOrCreateCollection = (collectionName) =>
   getClient().getOrCreateCollection({ name: collectionName, embeddingFunction: getEmbeddingFunction() });
 
