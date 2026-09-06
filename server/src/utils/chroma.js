@@ -1,9 +1,23 @@
-import { ChromaClient } from 'chromadb';
+import { ChromaClient, CloudClient } from 'chromadb';
 
 let client = null;
 const getClient = () => {
   if (!client) {
-    client = new ChromaClient({ host: 'localhost', port: 8000, ssl: false });
+    // Chroma Cloud in production (set CHROMA_API_KEY); falls back to a local Chroma
+    // server for dev, unchanged from before (`npm run chroma`, localhost:8000). This was a
+    // real production gap until now — the local-only connection meant every Study Plan/
+    // Project-file upload silently failed to index on any deployed environment.
+    client = process.env.CHROMA_API_KEY
+      ? new CloudClient({
+          apiKey: process.env.CHROMA_API_KEY,
+          tenant: process.env.CHROMA_TENANT,
+          database: process.env.CHROMA_DATABASE
+        })
+      : new ChromaClient({
+          host: process.env.CHROMA_HOST || 'localhost',
+          port: Number(process.env.CHROMA_PORT) || 8000,
+          ssl: false
+        });
   }
   return client;
 };
