@@ -3,9 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, Sparkles } from 'lucide-react';
 
-export default function MarkdownRenderer({ content }) {
+export default function MarkdownRenderer({ content, onExplain }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -15,7 +15,10 @@ export default function MarkdownRenderer({ content }) {
           const lang = match?.[1];
           const text = String(children).replace(/\n$/, '');
           if (inline) return <code className={className} {...props}>{children}</code>;
-          return <CodeBlock language={lang} text={text} />;
+          return <CodeBlock language={lang} text={text} onExplain={onExplain} />;
+        },
+        table({ children }) {
+          return <div className="overflow-x-auto my-4 rounded-xl border border-line2"><table className="min-w-full">{children}</table></div>;
         }
       }}
     >
@@ -24,7 +27,7 @@ export default function MarkdownRenderer({ content }) {
   );
 }
 
-function CodeBlock({ language, text }) {
+function CodeBlock({ language, text, onExplain }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -38,23 +41,33 @@ function CodeBlock({ language, text }) {
   };
 
   return (
-    <div className="relative my-4 border border-rule bg-paper">
+    <div className="relative my-4 rounded-xl border border-line2 overflow-hidden">
       {/* terminal header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-rule-subtle">
+      <div className="flex items-center justify-between px-4 py-2 bg-card-raised border-b border-line2">
         <div className="flex items-center gap-3">
           <div className="flex gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-rule-strong"></span>
-            <span className="w-2 h-2 rounded-full bg-rule-strong"></span>
-            <span className="w-2 h-2 rounded-full bg-signal"></span>
+            <span className="w-2 h-2 rounded-full bg-line2-strong"></span>
+            <span className="w-2 h-2 rounded-full bg-line2-strong"></span>
+            <span className="w-2 h-2 rounded-full bg-brand"></span>
           </div>
-          <span className="label-xs text-ink-faint">{language || 'text'}</span>
+          <span className="text-[11px] font-mono text-text2-faint">{language || 'text'}</span>
         </div>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1.5 label-xs text-ink-faint hover:text-signal transition-colors"
-        >
-          {copied ? <><Check className="w-3 h-3 text-signal" /> COPIED</> : <><Copy className="w-3 h-3" /> COPY</>}
-        </button>
+        <div className="flex items-center gap-3">
+          {onExplain && (
+            <button
+              onClick={() => onExplain(text, language)}
+              className="flex items-center gap-1.5 text-[11px] text-text2-faint hover:text-brand-soft transition-colors"
+            >
+              <Sparkles className="w-3 h-3" /> Explain
+            </button>
+          )}
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 text-[11px] text-text2-faint hover:text-brand-soft transition-colors"
+          >
+            {copied ? <><Check className="w-3 h-3 text-state-success" /> Copied</> : <><Copy className="w-3 h-3" /> Copy</>}
+          </button>
+        </div>
       </div>
       <SyntaxHighlighter
         language={language || 'text'}
@@ -62,9 +75,10 @@ function CodeBlock({ language, text }) {
         customStyle={{
           margin: 0,
           padding: '14px 16px',
-          background: '#0A0907',
+          background: '#0D0E14',
           fontSize: '13px',
-          lineHeight: '1.7'
+          lineHeight: '1.7',
+          overflowX: 'auto'
         }}
         codeTagProps={{ style: { fontFamily: '"JetBrains Mono", monospace' } }}
       >

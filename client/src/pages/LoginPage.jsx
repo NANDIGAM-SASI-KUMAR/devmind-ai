@@ -1,22 +1,33 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
-import { ArrowUpRight, Loader2 } from 'lucide-react';
+import { AuthShell, InputField, ErrorBanner, SubmitButton, OtpStep } from '../components/auth/AuthPrimitives.jsx';
+import { Mail, Lock, ArrowRight } from 'lucide-react';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { requestLogin, verifyLoginOtp, resendOtp } = useAuth();
+
+  const [step, setStep] = useState('form'); // 'form' | 'otp'
   const [form, setForm] = useState({ email: '', password: '' });
+  const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      await login(form.email, form.password);
-      navigate('/dashboard');
+      const data = await requestLogin(form.email, form.password);
+      if (data.token) {
+        navigate('/dashboard');
+        return;
+      }
+      setStep('otp');
+      setNotice(`We sent a 6-digit code to ${form.email}`);
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
     } finally {
@@ -24,119 +35,93 @@ export default function LoginPage() {
     }
   };
 
+  const handleVerify = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      await verifyLoginOtp(form.email, code);
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Verification failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setError('');
+    setResending(true);
+    try {
+      await resendOtp(form.email, 'login');
+      setNotice(`New code sent to ${form.email}`);
+      setCode('');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not resend code');
+    } finally {
+      setResending(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex flex-col md:flex-row atmosphere">
-      {/* LEFT — editorial column */}
-      <aside className="md:w-1/2 md:border-r border-rule p-6 md:p-10 flex flex-col justify-between min-h-[40vh] md:min-h-screen relative">
-        <div>
-          <Link to="/" className="flex items-center gap-3">
-            <span className="stamp text-signal">dm</span>
-            <div className="label-xs text-ink-faint">DEVMIND / EST. 2026</div>
-          </Link>
-        </div>
+    <AuthShell>
+      {step === 'form' ? (
+        <>
+          <h1 className="font-heading text-2xl font-bold text-text2 mb-1">Welcome back</h1>
+          <p className="text-text2-muted text-sm mb-8">Sign in to continue to your workspace.</p>
 
-        <div className="my-12 md:my-0 stagger">
-          <div className="label-xs text-signal mb-4">§ ENTRY · 002</div>
-          <blockquote className="display text-5xl md:text-6xl lg:text-7xl leading-[0.95] mb-8">
-            <span className="display-italic">"Welcome</span> back to the workshop."
-          </blockquote>
-          <div className="dotted-rule max-w-xs mb-6"></div>
-          <p className="text-ink-muted font-display italic text-lg max-w-md leading-relaxed">
-            Your projects, conversations, and small machines have been kept warm.
-          </p>
-        </div>
-
-        <div className="label-xs text-ink-faint hidden md:flex justify-between">
-          <span>VOL. 01</span>
-          <span>SIGN IN · LEAF Nº 002</span>
-        </div>
-      </aside>
-
-      {/* RIGHT — form */}
-      <section className="md:w-1/2 p-6 md:p-10 flex flex-col justify-center">
-        <div className="max-w-md w-full mx-auto stagger">
-          <div className="flex items-baseline gap-4 mb-3">
-            <span className="label-xs text-signal">§ 02</span>
-            <span className="label-xs text-ink-faint">Sign in</span>
-          </div>
-          <h1 className="display text-5xl md:text-6xl mb-3">
-            <span className="display-italic">Hello</span> again.
-          </h1>
-          <p className="text-ink-muted mb-10">Enter your credentials below.</p>
-
-          <form onSubmit={handleSubmit} className="space-y-7">
-            <Field
-              n="01"
-              label="Email"
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <InputField
+              icon={Mail}
+              label="Email address"
               type="email"
               value={form.email}
               onChange={(v) => setForm({ ...form, email: v })}
-              placeholder="you@workshop.dev"
+              placeholder="you@company.com"
             />
-
-            <Field
-              n="02"
+            <InputField
+              icon={Lock}
               label="Password"
               type="password"
               value={form.password}
               onChange={(v) => setForm({ ...form, password: v })}
-              placeholder="•••••••• "
+              placeholder="••••••••"
             />
 
-            {error && (
-              <div className="border border-warm/40 bg-warm/5 p-3 text-warm text-sm font-display italic animate-fade-in">
-                ⚠ {error}
-              </div>
-            )}
+            <div className="flex justify-end -mt-1">
+              <Link to="/forgot-password" className="text-sm text-brand-soft hover:text-brand-glow transition-colors">
+                Forgot password?
+              </Link>
+            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="group w-full bg-signal text-paper py-4 flex items-center justify-between px-5 hover:bg-ink transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="label-xs">
-                {loading ? 'Authenticating…' : 'Sign in & continue'}
-              </span>
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" strokeWidth={2.5} />
-              )}
-            </button>
+            {error && <ErrorBanner message={error} />}
+
+            <SubmitButton loading={loading}>
+              Continue <ArrowRight className="w-4 h-4" />
+            </SubmitButton>
           </form>
 
-          <div className="mt-10 pt-6 border-t border-rule">
-            <p className="text-sm text-ink-muted">
-              New to the atelier?{' '}
-              <Link to="/signup" className="text-signal hover:text-ink transition-colors underline underline-offset-4">
-                Request a key
-              </Link>
-            </p>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Field({ n, label, type, value, onChange, placeholder }) {
-  return (
-    <label className="block group">
-      <div className="flex items-baseline justify-between mb-2">
-        <div className="flex items-baseline gap-3">
-          <span className="label-xs text-signal">{n}</span>
-          <span className="label-xs text-ink-muted">{label}</span>
-        </div>
-        <span className="label-xs text-ink-faint">required</span>
-      </div>
-      <input
-        type={type}
-        required
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full bg-transparent border-b border-rule-strong px-0 py-3 text-lg font-display italic placeholder:text-ink-ghost focus:border-signal focus:outline-none transition-colors"
-      />
-    </label>
+          <p className="text-center text-sm text-text2-muted mt-8">
+            Don't have an account?{' '}
+            <Link to="/signup" className="text-brand-soft hover:text-brand-glow font-medium transition-colors">
+              Sign up
+            </Link>
+          </p>
+        </>
+      ) : (
+        <OtpStep
+          email={form.email}
+          code={code}
+          setCode={setCode}
+          onSubmit={handleVerify}
+          onResend={handleResend}
+          onBack={() => setStep('form')}
+          loading={loading}
+          resending={resending}
+          error={error}
+          notice={notice}
+        />
+      )}
+    </AuthShell>
   );
 }

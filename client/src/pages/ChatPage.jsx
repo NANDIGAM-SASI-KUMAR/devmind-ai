@@ -1,11 +1,16 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Circle, Pencil, Check, X, Settings2, Paperclip, ListTodo } from 'lucide-react';
 import { projectsAPI } from '../api/projects.js';
-import { streamChatMessage } from '../api/chat.js';
+import { conversationsAPI } from '../api/conversations.js';
+import { streamChatMessage, regenerateMessage, editChatMessage } from '../api/chat.js';
 import MessageList from '../components/chat/MessageList.jsx';
 import MessageInput from '../components/chat/MessageInput.jsx';
 import AgentPicker from '../components/chat/AgentPicker.jsx';
+import AppShell from '../components/shell/AppShell.jsx';
+import ProjectInstructionsModal from '../components/dashboard/ProjectInstructionsModal.jsx';
+import ProjectFilesModal from '../components/dashboard/ProjectFilesModal.jsx';
+import ProjectTasksModal from '../components/dashboard/ProjectTasksModal.jsx';
 import { AGENT_META } from '../utils/agents.js';
 
 const STARTERS = [
@@ -16,32 +21,43 @@ const STARTERS = [
 ];
 
 export default function ChatPage() {
-  const { id } = useParams();
+  const { projectId, conversationId } = useParams();
   const navigate = useNavigate();
   const [project, setProject] = useState(null);
+  const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [streaming, setStreaming] = useState(false);
   const [agentOverride, setAgentOverride] = useState(null);
   const [activeAgent, setActiveAgent] = useState(null);
   const [streamingText, setStreamingText] = useState('');
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [showInstructions, setShowInstructions] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const [showTasks, setShowTasks] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        const [p, msgs] = await Promise.all([projectsAPI.get(id), projectsAPI.messages(id)]);
+        const [p, conv, msgs] = await Promise.all([
+          projectsAPI.get(projectId),
+          conversationsAPI.get(conversationId),
+          conversationsAPI.messages(conversationId)
+        ]);
         setProject(p);
+        setConversation(conv);
         setMessages(msgs);
       } catch (err) {
         console.error(err);
-        navigate('/dashboard');
+        navigate(`/project/${projectId}`);
       } finally {
         setLoading(false);
       }
     })();
-  }, [id, navigate]);
+  }, [projectId, conversationId, navigate]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -49,188 +65,272 @@ export default function ChatPage() {
     }
   }, [messages, streamingText]);
 
-  const handleSend = useCallback(
-    async (text) => {
-      if (!text.trim() || streaming) return;
-      const userMsg = {
-        _id: 'temp-' + Date.now(),
-        role: 'user',
-        content: text,
-        createdAt: new Date().toISOString()
-      };
-      setMessages((m) => [...m, userMsg]);
-      setStreaming(true);
+  // Shared SSE-event handling for send / edit / regenerate — they all stream the
+  // same event shape, differing only in the API call and how the local list mutates.
+  const runStream = useCallback(async (apiCall, { onUserSaved } = {}) => {
+    setStreaming(true);
+    setStreamingText('');
+    setActiveAgent(null);
+
+    let accumulated = '';
+    let chosenAgent = null;
+
+    try {
+      await apiCall({
+        onEvent: (event) => {
+          if (event.type === 'agent_selected') {
+            chosenAgent = event.agent;
+            setActiveAgent(event.agent);
+          } else if (event.type === 'user_message_saved') {
+            if (event.title) setConversation((c) => (c ? { ...c, title: event.title } : c));
+            onUserSaved?.(event);
+          } else if (event.type === 'chunk') {
+            accumulated += event.text;
+            setStreamingText(accumulated);
+          } else if (event.type === 'done') {
+            setMessages((m) => [
+              ...m,
+              {
+                _id: event.messageId || 'temp-assist-' + Date.now(),
+                role: 'assistant',
+                agent: chosenAgent,
+                content: accumulated,
+                createdAt: new Date().toISOString()
+              }
+            ]);
+            setStreamingText('');
+            setActiveAgent(null);
+          } else if (event.type === 'error') {
+            setMessages((m) => [
+              ...m,
+              { _id: 'err-' + Date.now(), role: 'assistant', agent: null, content: `⚠️ ${event.message}`, createdAt: new Date().toISOString() }
+            ]);
+            setStreamingText('');
+            setActiveAgent(null);
+          }
+        }
+      });
+    } catch (err) {
+      setMessages((m) => [
+        ...m,
+        { _id: 'err-' + Date.now(), role: 'assistant', agent: null, content: `⚠️ ${err.message}`, createdAt: new Date().toISOString() }
+      ]);
+    } finally {
+      setStreaming(false);
       setStreamingText('');
       setActiveAgent(null);
+    }
+  }, []);
 
-      let accumulated = '';
-      let chosenAgent = null;
-
-      try {
-        await streamChatMessage({
-          projectId: id,
-          message: text,
-          agent: agentOverride,
-          onEvent: (event) => {
-            if (event.type === 'agent_selected') {
-              chosenAgent = event.agent;
-              setActiveAgent(event.agent);
-            } else if (event.type === 'chunk') {
-              accumulated += event.text;
-              setStreamingText(accumulated);
-            } else if (event.type === 'done') {
-              setMessages((m) => [
-                ...m,
-                {
-                  _id: event.messageId || 'temp-assist-' + Date.now(),
-                  role: 'assistant',
-                  agent: chosenAgent,
-                  content: accumulated,
-                  createdAt: new Date().toISOString()
-                }
-              ]);
-              setStreamingText('');
-              setActiveAgent(null);
-            } else if (event.type === 'error') {
-              setMessages((m) => [
-                ...m,
-                {
-                  _id: 'err-' + Date.now(),
-                  role: 'assistant',
-                  agent: null,
-                  content: `⚠️ ${event.message}`,
-                  createdAt: new Date().toISOString()
-                }
-              ]);
-              setStreamingText('');
-              setActiveAgent(null);
-            }
-          }
-        });
-      } catch (err) {
-        setMessages((m) => [
-          ...m,
-          {
-            _id: 'err-' + Date.now(),
-            role: 'assistant',
-            agent: null,
-            content: `⚠️ ${err.message}`,
-            createdAt: new Date().toISOString()
-          }
-        ]);
-      } finally {
-        setStreaming(false);
-        setStreamingText('');
-        setActiveAgent(null);
-      }
+  const handleSend = useCallback(
+    (text) => {
+      if (!text.trim() || streaming) return;
+      setMessages((m) => [...m, { _id: 'temp-' + Date.now(), role: 'user', content: text, createdAt: new Date().toISOString() }]);
+      return runStream((opts) => streamChatMessage({ conversationId, message: text, agent: agentOverride, ...opts }));
     },
-    [id, agentOverride, streaming]
+    [conversationId, agentOverride, streaming, runStream]
   );
+
+  const handleExplainCode = useCallback(
+    (code, language) => {
+      handleSend(`Explain this ${language || ''} code:\n\n\`\`\`${language || ''}\n${code}\n\`\`\``);
+    },
+    [handleSend]
+  );
+
+  const handleRegenerateMessage = useCallback(
+    (messageId, agent) => {
+      if (streaming) return;
+      setMessages((m) => m.filter((msg) => msg._id !== messageId));
+      return runStream((opts) => regenerateMessage({ conversationId, messageId, agent, ...opts }));
+    },
+    [conversationId, streaming, runStream]
+  );
+
+  const handleEditMessage = useCallback(
+    (messageId, content) => {
+      if (!content.trim() || streaming) return;
+      const tempId = 'temp-' + Date.now();
+      setMessages((m) => {
+        const idx = m.findIndex((msg) => msg._id === messageId);
+        const before = idx >= 0 ? m.slice(0, idx) : m;
+        return [...before, { _id: tempId, role: 'user', content, createdAt: new Date().toISOString() }];
+      });
+      return runStream(
+        (opts) => editChatMessage({ conversationId, messageId, content, agent: agentOverride, ...opts }),
+        { onUserSaved: (event) => setMessages((m) => m.map((msg) => (msg._id === tempId ? { ...msg, _id: event.messageId } : msg))) }
+      );
+    },
+    [conversationId, agentOverride, streaming, runStream]
+  );
+
+  const startEditTitle = () => {
+    setTitleDraft(conversation?.title || '');
+    setEditingTitle(true);
+  };
+
+  const saveTitle = async () => {
+    const title = titleDraft.trim();
+    setEditingTitle(false);
+    if (!title || title === conversation?.title) return;
+    try {
+      const updated = await conversationsAPI.update(conversationId, { title });
+      setConversation(updated);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen atmosphere flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-signal" />
-      </div>
+      <AppShell>
+        <div className="h-full flex items-center justify-center">
+          <Loader2 className="w-5 h-5 animate-spin text-brand" />
+        </div>
+      </AppShell>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col atmosphere">
-      {/* ============ TOP BAR ============ */}
-      <header className="border-b border-rule bg-paper/95 backdrop-blur sticky top-0 z-30">
-        <div className="flex items-center justify-between px-4 md:px-8 py-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <Link
-              to="/dashboard"
-              className="p-2 text-ink-faint hover:text-signal hover:bg-surface transition-colors flex-shrink-0"
-              title="Back to archive"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
-
-            <div className="hairline-v h-6 hidden md:block"></div>
-
+    <AppShell>
+      <div className="h-full flex flex-col p-3 md:p-4 gap-3">
+        {/* ============ TOP BAR — floating rounded panel ============ */}
+        <header className="flex-shrink-0 rounded-2xl border border-line2 bg-card/90 backdrop-blur shadow-lg shadow-black/20 overflow-hidden sticky top-3 z-30">
+          <div className="flex items-center justify-between gap-4 px-4 md:px-6 py-3">
             <div className="flex items-center gap-3 min-w-0">
-              <span
-                className="numeral text-2xl md:text-3xl flex-shrink-0"
-                style={{ color: project?.color }}
+              <Link
+                to="/projects"
+                className="p-2 rounded-xl text-text2-faint hover:text-text2 hover:bg-card-hover transition-colors flex-shrink-0"
+                title="Back to projects"
               >
-                §
-              </span>
+                <ArrowLeft className="w-4 h-4" />
+              </Link>
               <div className="min-w-0">
-                <h1 className="display text-xl md:text-2xl leading-tight truncate">
-                  {project?.name}
-                </h1>
-                {project?.description && (
-                  <p className="label-xs text-ink-faint truncate mt-0.5">
-                    {project.description}
-                  </p>
+                {editingTitle ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveTitle();
+                        if (e.key === 'Escape') setEditingTitle(false);
+                      }}
+                      className="font-heading text-base font-bold text-text2 bg-card-hover rounded-lg px-2 py-1 focus:outline-none w-full max-w-xs"
+                    />
+                    <button onClick={saveTitle} aria-label="Save title" className="p-1.5 rounded-lg text-state-success hover:bg-state-success/10">
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setEditingTitle(false)} aria-label="Cancel title edit" className="p-1.5 rounded-lg text-text2-faint hover:bg-card-hover">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={startEditTitle} className="group flex items-center gap-1.5 min-w-0">
+                    <h1 className="font-heading text-base font-bold text-text2 truncate">{conversation?.title}</h1>
+                    <Pencil className="w-3 h-3 text-text2-faint opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                  </button>
                 )}
+                <p className="text-xs text-text2-faint truncate">{project?.name}</p>
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => setShowTasks(true)}
+                aria-label="Open tasks"
+                className="p-2 rounded-xl text-text2-faint hover:text-text2 hover:bg-card-hover transition-colors"
+                title="Tasks"
+              >
+                <ListTodo className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setShowFiles(true)}
+                aria-label="Open project files"
+                className="p-2 rounded-xl text-text2-faint hover:text-text2 hover:bg-card-hover transition-colors"
+                title="Project files"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setShowInstructions(true)}
+                aria-label="Open project instructions"
+                className="p-2 rounded-xl text-text2-faint hover:text-text2 hover:bg-card-hover transition-colors"
+                title="Project instructions"
+              >
+                <Settings2 className="w-4 h-4" />
+              </button>
+              <AgentPicker value={agentOverride} onChange={setAgentOverride} />
             </div>
           </div>
 
-          <AgentPicker value={agentOverride} onChange={setAgentOverride} />
-        </div>
+          <div className="hidden md:flex items-center justify-between px-6 py-2 bg-card-raised text-xs text-text2-faint">
+            <div className="flex items-center gap-5">
+              <span className="flex items-center gap-1.5">
+                <Circle className="w-2 h-2 fill-state-success text-state-success" />
+                Session live
+              </span>
+              <span>{messages.length} {messages.length === 1 ? 'message' : 'messages'}</span>
+              {project?.tech?.length > 0 && <span>{project.tech.join(' · ')}</span>}
+            </div>
+            <span>{agentOverride ? `${AGENT_META[agentOverride]?.label} mode` : 'Auto mode — orchestrator selects the specialist'}</span>
+          </div>
+        </header>
 
-        {/* status bar */}
-        <div className="hidden md:flex items-center justify-between px-8 py-1.5 border-t border-rule-subtle bg-surface/40">
-          <div className="flex items-center gap-6 label-xs text-ink-faint">
-            <span><span className="text-signal">●</span> SESSION LIVE</span>
-            <span>{messages.length} {messages.length === 1 ? 'MESSAGE' : 'MESSAGES'}</span>
-            {project?.tech?.length > 0 && (
-              <span>STACK · {project.tech.join(' · ').toUpperCase()}</span>
+        {/* ============ TRANSCRIPT — floating rounded panel ============ */}
+        <div
+          ref={scrollRef}
+          className="flex-1 min-h-0 overflow-y-auto rounded-2xl border border-line2 bg-card/40"
+        >
+          <div className="max-w-3xl mx-auto px-4 md:px-8 py-8">
+            {messages.length === 0 && !streaming ? (
+              <EmptyChat onPrompt={handleSend} />
+            ) : (
+              <MessageList
+                messages={messages}
+                streamingText={streamingText}
+                activeAgent={activeAgent}
+                isStreaming={streaming}
+                onEditMessage={handleEditMessage}
+                onRegenerateMessage={handleRegenerateMessage}
+                onExplainCode={handleExplainCode}
+              />
             )}
           </div>
-          <span className="label-xs text-ink-faint">
-            DEVMIND · CHAT · LEAF Nº {String(messages.length).padStart(3, '0')}
-          </span>
         </div>
-      </header>
 
-      {/* ============ TRANSCRIPT ============ */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-4 md:px-8 py-8">
-          {messages.length === 0 && !streaming ? (
-            <EmptyChat onPrompt={handleSend} />
-          ) : (
-            <MessageList
-              messages={messages}
-              streamingText={streamingText}
-              activeAgent={activeAgent}
-              isStreaming={streaming}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* ============ INPUT ============ */}
-      <div className="border-t border-rule bg-paper/95 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-4 md:px-8 py-4">
+        {/* ============ INPUT — floating rounded command bar ============ */}
+        <div className="flex-shrink-0 max-w-3xl w-full mx-auto">
           <MessageInput onSend={handleSend} disabled={streaming} />
         </div>
       </div>
-    </div>
+
+      {showInstructions && project && (
+        <ProjectInstructionsModal
+          project={project}
+          onClose={() => setShowInstructions(false)}
+          onSave={async (instructions) => {
+            const updated = await projectsAPI.update(projectId, { instructions });
+            setProject(updated);
+          }}
+        />
+      )}
+
+      {showFiles && <ProjectFilesModal projectId={projectId} onClose={() => setShowFiles(false)} />}
+      {showTasks && <ProjectTasksModal projectId={projectId} onClose={() => setShowTasks(false)} />}
+    </AppShell>
   );
 }
 
 function EmptyChat({ onPrompt }) {
   return (
-    <div className="py-12 animate-fade-in">
-      <div className="mb-12 stagger">
-        <div className="label-xs text-signal mb-3">§ NEW SESSION</div>
-        <h2 className="display text-5xl md:text-6xl mb-3">
-          What shall we <span className="display-italic">build</span>?
-        </h2>
-        <p className="text-ink-muted font-display italic text-lg max-w-lg leading-relaxed">
-          Type a message below, or begin with one of these openers.
-        </p>
+    <div className="py-8 auth-fade-in">
+      <div className="mb-10">
+        <h2 className="font-heading text-3xl md:text-4xl font-bold text-text2 mb-2">What shall we build?</h2>
+        <p className="text-text2-muted">Type a message below, or begin with one of these openers.</p>
       </div>
 
-      <div className="hairline mb-px"></div>
-
-      <div className="space-y-px bg-rule border-x border-b border-rule">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {STARTERS.map((s, i) => {
           const meta = AGENT_META[s.agent];
           const Icon = meta.icon;
@@ -238,33 +338,20 @@ function EmptyChat({ onPrompt }) {
             <button
               key={i}
               onClick={() => onPrompt(s.text)}
-              className="group w-full bg-paper hover:bg-surface transition-colors p-5 md:p-6 text-left"
-              style={{ animation: `fadeUp 0.6s cubic-bezier(0.22, 1, 0.36, 1) ${i * 0.08 + 0.2}s both` }}
+              className="group text-left bg-card border border-line2 rounded-2xl p-5 hover:border-line2-strong hover:bg-card-hover transition-all"
             >
-              <div className="flex items-start gap-5">
-                <span className="numeral text-3xl md:text-4xl flex-shrink-0" style={{ color: meta.color }}>
-                  {meta.n}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Icon className="w-3.5 h-3.5" style={{ color: meta.color }} strokeWidth={2} />
-                    <span className="label-xs" style={{ color: meta.color }}>{meta.label}</span>
-                    <span className="label-xs text-ink-faint">/ {meta.role}</span>
-                  </div>
-                  <p className="font-display italic text-lg md:text-xl text-ink-muted group-hover:text-ink transition-colors leading-snug">
-                    "{s.text}"
-                  </p>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ backgroundColor: `${meta.color}22` }}>
+                  <Icon className="w-3.5 h-3.5" style={{ color: meta.color }} strokeWidth={2.2} />
                 </div>
+                <span className="text-xs font-semibold" style={{ color: meta.color }}>{meta.label}</span>
               </div>
+              <p className="text-sm text-text2-muted leading-relaxed group-hover:text-text2 transition-colors">
+                {s.text}
+              </p>
             </button>
           );
         })}
-      </div>
-
-      <div className="dotted-rule mt-6"></div>
-      <div className="flex justify-between mt-3 label-xs text-ink-faint">
-        <span>OR · COMPOSE BELOW</span>
-        <span>04 SUGGESTIONS</span>
       </div>
     </div>
   );

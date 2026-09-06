@@ -14,14 +14,18 @@ Guidelines:
 
 You can write: React, Node.js, Python, SQL, HTML/CSS, TypeScript, and more.`;
 
-export const coderAgent = async ({ userMessage, history = [], onChunk }) => {
+export const coderAgent = async ({ userMessage, history = [], projectContext, onChunk }) => {
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: userMessage }
   ];
 
+  const system = projectContext
+    ? `${SYSTEM_PROMPT}\n\nProject context (follow these conventions):\n${projectContext}`
+    : SYSTEM_PROMPT;
+
   return streamLLM({
-    system: SYSTEM_PROMPT,
+    system,
     messages,
     maxTokens: 2500,
     onChunk

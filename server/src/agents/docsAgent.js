@@ -16,14 +16,18 @@ Default to markdown. For a README, use this structure:
 
 Match the formality to the project. Open-source projects can be friendly; enterprise docs should be precise.`;
 
-export const docsAgent = async ({ userMessage, history = [], onChunk }) => {
+export const docsAgent = async ({ userMessage, history = [], projectContext, onChunk }) => {
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: userMessage }
   ];
 
+  const system = projectContext
+    ? `${SYSTEM_PROMPT}\n\nProject context (follow these conventions):\n${projectContext}`
+    : SYSTEM_PROMPT;
+
   return streamLLM({
-    system: SYSTEM_PROMPT,
+    system,
     messages,
     maxTokens: 2500,
     onChunk

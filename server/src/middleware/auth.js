@@ -22,3 +22,12 @@ export const protect = async (req, res, next) => {
 
 export const generateToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+
+export const generateResetToken = (id) =>
+  jwt.sign({ id, purpose: 'reset' }, process.env.JWT_SECRET, { expiresIn: '10m' });
+
+export const verifyResetToken = (token) => {
+  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  if (decoded.purpose !== 'reset') throw new Error('Invalid token');
+  return decoded;
+};

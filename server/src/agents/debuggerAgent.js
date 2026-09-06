@@ -13,14 +13,18 @@ Response format:
 
 Be direct. Don't add fluff. If you need more info (e.g. version numbers, related code), ask for it.`;
 
-export const debuggerAgent = async ({ userMessage, history = [], onChunk }) => {
+export const debuggerAgent = async ({ userMessage, history = [], projectContext, onChunk }) => {
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: userMessage }
   ];
 
+  const system = projectContext
+    ? `${SYSTEM_PROMPT}\n\nProject context (follow these conventions):\n${projectContext}`
+    : SYSTEM_PROMPT;
+
   return streamLLM({
-    system: SYSTEM_PROMPT,
+    system,
     messages,
     maxTokens: 2000,
     onChunk

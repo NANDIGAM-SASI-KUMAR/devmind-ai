@@ -6,9 +6,50 @@ export default {
       fontFamily: {
         display: ['"Fraunces"', 'Georgia', 'serif'],
         sans: ['"Inter"', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace']
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        heading: ['"Manrope"', '"Inter"', 'system-ui', 'sans-serif']
       },
       colors: {
+        // New UI palette — premium dark developer aesthetic, additive (does not replace the legacy tokens below)
+        night: {
+          DEFAULT: '#08090D',
+          soft: '#0B0C12'
+        },
+        card: {
+          DEFAULT: '#111219',
+          raised: '#15161F',
+          hover: '#1A1C27'
+        },
+        line2: {
+          DEFAULT: '#22242F',
+          soft: '#1A1C25',
+          strong: '#33364A'
+        },
+        text2: {
+          DEFAULT: '#F3F4F7',
+          muted: '#9195A5',
+          faint: '#5B5F70'
+        },
+        brand: {
+          DEFAULT: '#6366F1',
+          soft: '#818CF8',
+          strong: '#4F46E5',
+          glow: '#A5B4FC'
+        },
+        state: {
+          success: '#34D399',
+          danger: '#F87171',
+          warning: '#FBBF24'
+        },
+        specialist: {
+          orchestrator: '#A78BFA',
+          planner: '#818CF8',
+          coder: '#38BDF8',
+          debugger: '#FB923C',
+          docs: '#2DD4BF',
+          reviewer: '#F472B6',
+          tester: '#22D3EE'
+        },
         // Warm dark "archive paper" palette
         paper: '#0E0D0B',
         ink: {

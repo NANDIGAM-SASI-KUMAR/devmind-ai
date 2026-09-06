@@ -13,14 +13,18 @@ When responding:
 Be practical, specific, and concise. Don't write code — that's the Coder Agent's job.
 Use markdown formatting.`;
 
-export const plannerAgent = async ({ userMessage, history = [], onChunk }) => {
+export const plannerAgent = async ({ userMessage, history = [], projectContext, onChunk }) => {
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: userMessage }
   ];
 
+  const system = projectContext
+    ? `${SYSTEM_PROMPT}\n\nProject context (follow these conventions):\n${projectContext}`
+    : SYSTEM_PROMPT;
+
   return streamLLM({
-    system: SYSTEM_PROMPT,
+    system,
     messages,
     maxTokens: 1500,
     onChunk

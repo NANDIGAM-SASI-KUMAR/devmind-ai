@@ -9,3 +9,5 @@ build/
 .vscode/
 .idea/
 coverage/
+server/uploads/
+server/chroma_data/

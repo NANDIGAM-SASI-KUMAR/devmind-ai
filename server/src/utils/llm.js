@@ -1,54 +1,77 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+const API_URL = 'https://api.sarvam.ai/v1/chat/completions';
+// sarvam-105b is a reasoning model that spends part of max_tokens on hidden
+// reasoning_content before writing the actual answer — with small token budgets
+// (e.g. the router's one-word classification) that leaves nothing for `content`,
+// which comes back null. sarvam-105b-conversations answers directly instead.
+const MODEL = 'sarvam-105b-conversations';
 
-let genAI = null;
-
-const getClient = () => {
-  if (!genAI) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY is not set in .env');
-    }
-    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const getApiKey = () => {
+  if (!process.env.SARVAM_API_KEY) {
+    throw new Error('SARVAM_API_KEY is not set in .env');
   }
-  return genAI;
+  return process.env.SARVAM_API_KEY;
 };
 
-const MODEL = 'gemini-2.0-flash';
-
-const toGeminiHistory = (messages) =>
-  messages.map((m) => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }]
-  }));
+const toSarvamMessages = (system, messages) => [
+  { role: 'system', content: system },
+  ...messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))
+];
 
 export const callLLM = async ({ system, messages, maxTokens = 2048 }) => {
-  const model = getClient().getGenerativeModel({
-    model: MODEL,
-    systemInstruction: system,
-    generationConfig: { maxOutputTokens: maxTokens }
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${getApiKey()}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: toSarvamMessages(system, messages),
+      max_tokens: maxTokens
+    })
   });
-  const history = toGeminiHistory(messages);
-  const last = history.pop();
-  const chat = model.startChat({ history });
-  const result = await chat.sendMessage(last.parts[0].text);
-  return result.response.text();
+  if (!res.ok) {
+    throw new Error(`Sarvam API error ${res.status}: ${await res.text()}`);
+  }
+  const data = await res.json();
+  return data.choices[0].message.content;
 };
 
 export const streamLLM = async ({ system, messages, maxTokens = 2048, onChunk }) => {
-  const model = getClient().getGenerativeModel({
-    model: MODEL,
-    systemInstruction: system,
-    generationConfig: { maxOutputTokens: maxTokens }
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${getApiKey()}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: toSarvamMessages(system, messages),
+      max_tokens: maxTokens,
+      stream: true
+    })
   });
-  const history = toGeminiHistory(messages);
-  const last = history.pop();
-  const chat = model.startChat({ history });
-  const result = await chat.sendMessageStream(last.parts[0].text);
+  if (!res.ok) {
+    throw new Error(`Sarvam API error ${res.status}: ${await res.text()}`);
+  }
+
   let full = '';
-  for await (const chunk of result.stream) {
-    const text = chunk.text();
-    if (text) {
-      full += text;
-      if (onChunk) onChunk(text);
+  let buffer = '';
+  for await (const chunk of res.body) {
+    buffer += Buffer.from(chunk).toString('utf8');
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      const parsed = JSON.parse(payload);
+      const text = parsed.choices?.[0]?.delta?.content;
+      if (text) {
+        full += text;
+        if (onChunk) onChunk(text);
+      }
     }
   }
   return full;

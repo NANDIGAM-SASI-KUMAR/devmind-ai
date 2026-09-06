@@ -1,20 +1,19 @@
 import { API_URL } from './client.js';
 
 /**
- * Send a chat message and stream the response.
- * Calls onEvent(event) for every SSE event.
- *
- * Event types: agent_selected, user_message_saved, chunk, done, error
+ * POSTs to `url` and streams back SSE events, calling onEvent(event) for each one.
+ * Event types vary by endpoint but generally include: agent_selected,
+ * user_message_saved, chunk, done, error.
  */
-export const streamChatMessage = async ({ projectId, message, agent, onEvent, signal }) => {
+const streamSSE = async (url, body, onEvent, signal) => {
   const token = localStorage.getItem('token');
-  const res = await fetch(`${API_URL}/chat/${projectId}`, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ message, agent }),
+    body: JSON.stringify(body),
     signal
   });
 
@@ -46,3 +45,15 @@ export const streamChatMessage = async ({ projectId, message, agent, onEvent, si
     }
   }
 };
+
+/** Send a new chat message and stream the response. */
+export const streamChatMessage = ({ conversationId, message, agent, onEvent, signal }) =>
+  streamSSE(`${API_URL}/chat/${conversationId}`, { message, agent }, onEvent, signal);
+
+/** Delete an assistant message and re-run its preceding prompt, streaming a fresh response. */
+export const regenerateMessage = ({ conversationId, messageId, agent, onEvent, signal }) =>
+  streamSSE(`${API_URL}/chat/${conversationId}/regenerate`, { messageId, agent }, onEvent, signal);
+
+/** Edit a user message, drop everything after it, and stream a fresh response. */
+export const editChatMessage = ({ conversationId, messageId, content, agent, onEvent, signal }) =>
+  streamSSE(`${API_URL}/chat/${conversationId}/edit`, { messageId, content, agent }, onEvent, signal);
