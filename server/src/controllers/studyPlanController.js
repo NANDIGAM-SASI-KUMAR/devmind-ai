@@ -14,6 +14,8 @@ import { addChunks, deleteMaterialChunks, deleteStudyPlanCollection, queryChunks
 import { askStudyAgent } from '../agents/studyAgent.js';
 import { generateStudyPlanFromContext } from '../agents/studyPlanAgent.js';
 import { notify } from './notificationController.js';
+import { invalidateResultsCache } from './resultsController.js';
+import { cacheDelByPrefix } from '../utils/cache.js';
 
 // Pulls a broad, de-duplicated sample of a study plan's indexed material —
 // queried per-material-name plus a generic overview query — so generation
@@ -103,6 +105,10 @@ export const deleteStudyPlan = async (req, res) => {
   if (!plan) return res.status(404).json({ message: 'Study plan not found' });
 
   await cascadeDeleteStudyPlanData(plan._id);
+  await Promise.all([
+    invalidateResultsCache(req.user._id),
+    cacheDelByPrefix(`progress:${req.user._id}:${plan._id}`)
+  ]);
   res.json({ message: 'Study plan deleted' });
 };
 
@@ -236,6 +242,8 @@ export const generatePlan = async (req, res) => {
     plan.plan = JSON.stringify(weeks);
     plan.planGeneratedAt = new Date();
     await plan.save();
+
+    await invalidateResultsCache(req.user._id);
 
     await notify(req.user._id, {
       type: 'study_plan_generated',

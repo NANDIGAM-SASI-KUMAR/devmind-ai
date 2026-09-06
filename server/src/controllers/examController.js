@@ -13,6 +13,8 @@ import {
   generateLearningRecommendations
 } from '../agents/examAgents.js';
 import { notify } from './notificationController.js';
+import { invalidateResultsCache } from './resultsController.js';
+import { cacheDelByPrefix } from '../utils/cache.js';
 
 const WEAK_THRESHOLD = 70;
 const ALL_TYPES = ['mcq', 'true_false', 'short_answer'];
@@ -123,6 +125,12 @@ const gradeAttempt = async (attempt, exam, { autoSubmitted }) => {
   attempt.weakConcepts = weakConcepts;
   attempt.totalTimeSeconds = Math.round((attempt.submittedAt - attempt.startedAt) / 1000);
   await attempt.save();
+
+  // A graded attempt changes progress/mastery/results numbers everywhere they're shown.
+  await Promise.all([
+    invalidateResultsCache(attempt.user),
+    cacheDelByPrefix(`progress:${attempt.user}:${attempt.studyPlan}`)
+  ]);
 
   // Best-effort: feed real weaknesses back into a Study Plan recommendation. Never blocks grading.
   if (weakTopics.length > 0) {

@@ -5,6 +5,10 @@ import QuizAttempt from '../models/QuizAttempt.js';
 import { generateQuizFromContext } from '../agents/studyPlanAgent.js';
 import { gatherStudyContext } from './studyPlanController.js';
 import { notify } from './notificationController.js';
+import { invalidateResultsCache } from './resultsController.js';
+import { cached, cacheDelByPrefix } from '../utils/cache.js';
+
+const progressCacheKey = (userId, planId) => `progress:${userId}:${planId}`;
 
 const stripAnswers = (quiz) => ({
   _id: quiz._id,
@@ -112,6 +116,13 @@ export const submitQuiz = async (req, res) => {
 
   const weakTopics = [...new Set(graded.filter((g) => !g.correct).map((g) => g.topic))];
 
+  // A new attempt changes progress/mastery numbers everywhere they're shown — invalidate
+  // rather than wait out the TTL, so the student sees the real number immediately.
+  await Promise.all([
+    invalidateResultsCache(req.user._id),
+    cacheDelByPrefix(progressCacheKey(req.user._id, quiz.studyPlan))
+  ]);
+
   res.json({ attemptId: attempt._id, score, results: graded, weakTopics });
 };
 
@@ -139,13 +150,14 @@ export const getProgress = async (req, res) => {
   const plan = await StudyPlan.findOne({ _id: req.params.id, user: req.user._id });
   if (!plan) return res.status(404).json({ message: 'Study plan not found' });
 
-  const attempts = await QuizAttempt.find({ studyPlan: plan._id, user: req.user._id });
-  if (attempts.length === 0) {
-    return res.json({ hasData: false, topics: [], overallScore: null, attemptCount: 0 });
-  }
+  const result = await cached(progressCacheKey(req.user._id, plan._id), 60, async () => {
+    const attempts = await QuizAttempt.find({ studyPlan: plan._id, user: req.user._id });
+    if (attempts.length === 0) return { hasData: false, topics: [], overallScore: null, attemptCount: 0 };
 
-  const topics = computeTopicStatsFromAttempts(attempts);
-  const overallScore = Math.round(attempts.reduce((sum, a) => sum + a.score, 0) / attempts.length);
+    const topics = computeTopicStatsFromAttempts(attempts);
+    const overallScore = Math.round(attempts.reduce((sum, a) => sum + a.score, 0) / attempts.length);
+    return { hasData: true, topics, overallScore, attemptCount: attempts.length };
+  });
 
-  res.json({ hasData: true, topics, overallScore, attemptCount: attempts.length });
+  res.json(result);
 };
