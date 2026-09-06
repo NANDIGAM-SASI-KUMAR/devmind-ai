@@ -7,10 +7,15 @@ import QuizAttempt from '../models/QuizAttempt.js';
 import Exam from '../models/Exam.js';
 import ExamAttempt from '../models/ExamAttempt.js';
 import ExamRecommendation from '../models/ExamRecommendation.js';
+import RagParentChunk from '../models/RagParentChunk.js';
 import { STUDY_UPLOAD_DIR } from '../middleware/studyUpload.js';
 import { extractText } from '../utils/documentParser.js';
-import { chunkText } from '../utils/chunking.js';
-import { addChunks, deleteMaterialChunks, deleteStudyPlanCollection, queryChunks } from '../utils/chroma.js';
+import {
+  deleteMaterialChunks, deleteStudyPlanCollection, queryChunks,
+  addStructuredChunks, studyCollectionName
+} from '../utils/chroma.js';
+import { chunkStructured } from '../rag/chunking.js';
+import { runRagPipeline } from '../rag/pipeline.js';
 import { askStudyAgent } from '../agents/studyAgent.js';
 import { generateStudyPlanFromContext } from '../agents/studyPlanAgent.js';
 import { notify } from './notificationController.js';
@@ -92,6 +97,7 @@ export const cascadeDeleteStudyPlanData = async (planId) => {
   await Promise.all(materials.map((m) => fs.unlink(path.join(STUDY_UPLOAD_DIR, m.storedName)).catch(() => {})));
   await StudyMaterial.deleteMany({ studyPlan: planId });
   await deleteStudyPlanCollection(planId);
+  await RagParentChunk.deleteMany({ collectionName: studyCollectionName(planId) });
   await Quiz.deleteMany({ studyPlan: planId });
   await QuizAttempt.deleteMany({ studyPlan: planId });
   await Exam.deleteMany({ studyPlan: planId });
@@ -141,19 +147,37 @@ export const uploadMaterial = async (req, res) => {
   try {
     const filePath = path.join(STUDY_UPLOAD_DIR, req.file.filename);
     const text = await extractText(filePath, req.file.originalname);
-    const chunks = chunkText(text);
+    const { parents, children } = chunkStructured(text);
 
-    if (chunks.length === 0) {
+    if (children.length === 0) {
       material.status = 'failed';
       material.error = 'No extractable text found in this file';
       await material.save();
       return res.status(201).json(material);
     }
 
-    await addChunks(plan._id, material._id, req.file.originalname, chunks);
+    const collectionName = studyCollectionName(plan._id);
+    await RagParentChunk.insertMany(
+      parents.map((p) => ({
+        collectionName,
+        documentId: String(material._id),
+        parentId: `${material._id}_${p.parentId}`,
+        originalName: req.file.originalname,
+        heading: p.heading,
+        section: p.section,
+        text: p.text
+      }))
+    );
+    // Children's parentId must match the RagParentChunk records above exactly.
+    await addStructuredChunks(
+      plan._id,
+      material._id,
+      req.file.originalname,
+      children.map((c) => ({ ...c, parentId: `${material._id}_${c.parentId}` }))
+    );
 
     material.status = 'ready';
-    material.chunkCount = chunks.length;
+    material.chunkCount = children.length;
     await material.save();
     res.status(201).json(material);
   } catch (err) {
@@ -175,6 +199,7 @@ export const deleteMaterial = async (req, res) => {
 
   await fs.unlink(path.join(STUDY_UPLOAD_DIR, material.storedName)).catch(() => {});
   await deleteMaterialChunks(plan._id, material._id);
+  await RagParentChunk.deleteMany({ collectionName: studyCollectionName(plan._id), documentId: String(material._id) });
   await material.deleteOne();
 
   res.json({ message: 'Material deleted' });
@@ -202,16 +227,24 @@ export const askQuestion = async (req, res) => {
   const question = (req.body.question || '').trim();
   if (!question) return res.status(400).json({ message: 'Question is required' });
 
-  const matches = await queryChunks(plan._id, question, 6);
-  if (matches.length === 0) {
+  const readyCount = await StudyMaterial.countDocuments({ studyPlan: plan._id, status: 'ready' });
+  if (readyCount === 0) {
     return res.json({ answer: "You haven't uploaded any material for this study plan yet, so I don't have anything to answer from." });
   }
 
-  const context = matches.map((m) => m.text).join('\n\n---\n\n');
-
   try {
-    const answer = await askStudyAgent({ question, context, understandingLevel: plan.understandingLevel });
-    res.json({ answer, sources: [...new Set(matches.map((m) => m.metadata?.originalName))] });
+    const result = await runRagPipeline({
+      collectionName: studyCollectionName(plan._id),
+      query: question,
+      generate: (context) => askStudyAgent({ question, context, understandingLevel: plan.understandingLevel })
+    });
+    res.json({
+      answer: result.answer,
+      sources: [...new Set(result.citations.map((c) => c.source))],
+      citations: result.citations,
+      confidence: result.confidence,
+      grounded: result.grounded
+    });
   } catch (err) {
     console.error('Study agent failed:', err);
     res.status(500).json({ message: 'Could not generate an answer right now. Please try again.' });
